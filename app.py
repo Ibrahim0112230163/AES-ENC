@@ -1,287 +1,329 @@
+import hashlib
+import hmac
+import base64
+import time
 from flask import Flask, render_template_string, request
 from Crypto.Cipher import AES
-from Crypto.Random import get_random_bytes
-import base64
 
 app = Flask(__name__)
 
-# In a real app, this key should be stored securely (not hardcoded)
-# AES-128 requires a 16-byte key
-SECRET_KEY = b'this_is_16_bytes' 
+# Simulation "Secret Keys"
+AES_KEY = b'this_is_16_bytes'     # Used for Encryption
+HMAC_KEY = b'bank_private_key'    # Used for Digital Signature
+DEFAULT_PASS = "123456"
 
-def encrypt_aes(message):
-    cipher = AES.new(SECRET_KEY, AES.MODE_EAX)
+def build_secure_packet(amount, password):
+    # 1. Password Verification
+    if password != DEFAULT_PASS:
+        return {"error": "Invalid Password!"}
+
+    # 2. Generate Timestamp
+    current_time = time.strftime('%Y-%m-%d %H:%M:%S', time.localtime())
+
+    # 3. Create HMAC (Private Key Signature of the amount)
+    # This ensures the 'amount' cannot be changed by a hacker.
+    hmac_obj = hmac.new(HMAC_KEY, amount.encode(), hashlib.sha256)
+    signature = hmac_obj.hexdigest()
+
+    # 4. Construct the Payload (Amount | Timestamp | Signature)
+    # We use '|' as a delimiter so we can split it easily later
+    full_payload = f"{amount}|{current_time}|{signature}"
+
+    # 5. AES Encryption (Final Layer)
+    cipher = AES.new(AES_KEY, AES.MODE_EAX)
     nonce = cipher.nonce
-    ciphertext, tag = cipher.encrypt_and_digest(message.encode('utf-8'))
-    # Encode to Base64 so it can be displayed as text on the website
+    ciphertext, tag = cipher.encrypt_and_digest(full_payload.encode())
+
+    # This represents the "Encrypted Packet" sent to the bank server
     return {
-        "nonce": base64.b64encode(nonce).decode('utf-8'),
-        "ciphertext": base64.b64encode(ciphertext).decode('utf-8'),
-        "tag": base64.b64encode(tag).decode('utf-8')
+        "nonce": base64.b64encode(nonce).decode(),
+        "ciphertext": base64.b64encode(ciphertext).decode(),
+        "tag": base64.b64encode(tag).decode(),
+        "packet_preview": base64.b64encode(ciphertext[:16]).decode() + "...", # Preview
+        "timestamp": current_time
     }
 
-def decrypt_aes(nonce_b64, ciphertext_b64, tag_b64):
+def decrypt_and_verify(nonce_b64, ciphertext_b64, tag_b64):
     try:
-        nonce = base64.b64decode(nonce_b64)
-        ciphertext = base64.b64decode(ciphertext_b64)
-        tag = base64.b64decode(tag_b64)
-        
-        cipher = AES.new(SECRET_KEY, AES.MODE_EAX, nonce=nonce)
-        plaintext = cipher.decrypt_and_verify(ciphertext, tag)
-        return plaintext.decode('utf-8')
-    except Exception as e:
-        return f"Decryption Failed: {str(e)}"
+        # 1. AES Decrypt
+        cipher = AES.new(AES_KEY, AES.MODE_EAX, nonce=base64.b64decode(nonce_b64))
+        raw_data = cipher.decrypt_and_verify(
+            base64.b64decode(ciphertext_b64), 
+            base64.b64decode(tag_b64)
+        ).decode()
 
-# Professional Banking UI Template
+        # 2. Parse the Packet
+        amount, timestamp, received_hmac = raw_data.split('|')
+
+        # 3. Verify HMAC (Check if amount was tampered)
+        expected_hmac = hmac.new(HMAC_KEY, amount.encode(), hashlib.sha256).hexdigest()
+        
+        # Return both hashes for comparison
+        is_valid = hmac.compare_digest(expected_hmac, received_hmac)
+        
+        return {
+            "status": "SUCCESS" if is_valid else "TAMPERED",
+            "amount": amount,
+            "time": timestamp,
+            "received_hash": received_hmac,
+            "computed_hash": expected_hmac,
+            "hash_match": is_valid
+        }
+
+    except Exception as e:
+        return {"status": "ERROR", "msg": str(e)}
+
+# --- UI Template ---
 HTML_UI = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>AES Simulation - Encrypted Transaction System</title>
+    <title>ToCashless - Transaction Portal</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
-        
-        body {
-            font-family: 'Inter', sans-serif;
-        }
-        
-        .gradient-bg {
-            background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 50%, #1e40af 100%);
-        }
-        
-        .card-hover {
-            transition: all 0.3s ease;
-        }
-        
-        .card-hover:hover {
-            transform: translateY(-5px);
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
-        }
-        
-        .encrypted-text {
-            background: linear-gradient(90deg, #1f2937 0%, #111827 100%);
-            border-left: 4px solid #10b981;
-        }
-        
-        .pulse-animation {
-            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
-        
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: .7; }
-        }
-        
-        .btn-primary {
-            background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
-            transition: all 0.3s ease;
-        }
-        
-        .btn-primary:hover {
-            background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-            transform: scale(1.02);
-        }
-        
-        .btn-success {
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-            transition: all 0.3s ease;
-        }
-        
-        .btn-success:hover {
-            background: linear-gradient(135deg, #059669 0%, #047857 100%);
-            transform: scale(1.02);
-        }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+        .bank-gradient { background: linear-gradient(135deg, #1e3a8a 0%, #3b82f6 100%); }
+        .hash-box { font-family: 'Courier New', monospace; word-break: break-all; }
     </style>
 </head>
 <body class="bg-gray-50">
-    <!-- Header -->
-    <div class="gradient-bg text-white shadow-2xl">
-        <div class="max-w-7xl mx-auto px-4 py-6">
-            <div class="flex items-center justify-between">
-                <div class="flex items-center space-x-3">
-                    <i class="fas fa-shield-alt text-3xl"></i>
-                    <div>
-                        <h1 class="text-2xl font-bold">AES Simulation</h1>
-                        <p class="text-sm text-blue-100">AES-256 Encrypted Transaction System</p>
-                    </div>
+    <!-- Bank Header -->
+    <div class="bank-gradient text-white py-4 shadow-lg">
+        <div class="max-w-4xl mx-auto px-6 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <i class="fas fa-shield-alt text-3xl"></i>
+                <div>
+                    <h1 class="text-2xl font-bold">ToCashless</h1>
+                    <p class="text-xs text-blue-100">Encrypted Transaction System</p>
                 </div>
-                <div class="flex items-center space-x-2 bg-white/10 px-4 py-2 rounded-lg backdrop-blur-sm">
-                    <i class="fas fa-lock text-green-400"></i>
-                    <span class="text-sm font-medium">Secured Connection</span>
-                </div>
+            </div>
+            <div class="text-right text-sm">
+                <p class="font-semibold">Group A4</p>
+                <p class="text-blue-100">AES-256 Encrypted</p>
             </div>
         </div>
     </div>
 
-    <!-- Main Content -->
-    <div class="max-w-7xl mx-auto px-4 py-8">
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            
-            <!-- Sender Side - Encrypt Transaction -->
-            <div class="bg-white rounded-2xl shadow-xl p-8 card-hover border-t-4 border-blue-500">
-                <div class="flex items-center space-x-3 mb-6">
-                    <div class="bg-blue-100 p-3 rounded-lg">
-                        <i class="fas fa-paper-plane text-blue-600 text-2xl"></i>
-                    </div>
-                    <div>
-                        <h2 class="text-2xl font-bold text-gray-800">Sender</h2>
-                        <p class="text-sm text-gray-500">Encrypt Your Transaction</p>
-                    </div>
-                </div>
-                
-                <form method="POST" class="space-y-6">
+    <div class="max-w-4xl mx-auto px-6 py-8">
+        <!-- Client Transaction Form -->
+        <div class="bg-white rounded-xl shadow-lg overflow-hidden mb-6">
+            <div class="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4">
+                <h2 class="text-xl font-bold text-white flex items-center">
+                    <i class="fas fa-user-circle mr-3"></i>Client Portal - Initiate Transfer
+                </h2>
+            </div>
+            <div class="p-6">
+                <form method="POST" class="space-y-5">
                     <div>
                         <label class="block text-sm font-semibold text-gray-700 mb-2">
-                            <i class="fas fa-file-invoice-dollar mr-2"></i>Transaction Details
+                            <i class="fas fa-dollar-sign text-green-600 mr-2"></i>Transfer Amount (USD)
                         </label>
-                        <textarea 
-                            name="message" 
-                            rows="4"
-                            class="w-full px-4 py-3 border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all outline-none text-gray-700" 
-                            placeholder="Enter transaction details... (e.g., Transfer $5000 to Account #123456)"
-                            required
-                        ></textarea>
+                        <input type="number" name="amount" required 
+                               class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition text-lg"
+                               placeholder="Enter amount">
                     </div>
-                    
-                    <button 
-                        type="submit" 
-                        name="action" 
-                        value="encrypt" 
-                        class="btn-primary w-full text-white font-semibold py-4 px-6 rounded-lg shadow-lg flex items-center justify-center space-x-2"
-                    >
-                        <i class="fas fa-lock"></i>
-                        <span>Encrypt Transaction</span>
-                        <i class="fas fa-arrow-right"></i>
+                    <div>
+                        <label class="block text-sm font-semibold text-gray-700 mb-2">
+                            <i class="fas fa-lock text-red-600 mr-2"></i>Account Password
+                        </label>
+                        <input type="password" name="password" required 
+                               class="w-full p-3 border-2 border-gray-300 rounded-lg focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none transition"
+                               placeholder="Enter your password">
+                        <p class="text-xs text-gray-500 mt-1">
+                            <i class="fas fa-info-circle"></i> Default: 123456
+                        </p>
+                    </div>
+                    <button type="submit" name="action" value="encrypt" 
+                            class="w-full bg-gradient-to-r from-blue-600 to-blue-700 text-white py-3 px-6 rounded-lg font-bold text-lg hover:from-blue-700 hover:to-blue-800 transition shadow-md flex items-center justify-center">
+                        <i class="fas fa-paper-plane mr-2"></i>Authorize & Encrypt Transaction
                     </button>
                 </form>
 
-                <div class="mt-6 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                    <div class="flex items-start space-x-2">
-                        <i class="fas fa-info-circle text-blue-500 mt-1"></i>
-                        <div class="text-sm text-blue-800">
-                            <p class="font-semibold">Secure Encryption</p>
-                            <p class="text-blue-600">Your transaction will be encrypted using AES-256 encryption standard.</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Receiver Side - Decrypt & Verify -->
-            <div class="bg-white rounded-2xl shadow-xl p-8 card-hover border-t-4 border-green-500">
-                <div class="flex items-center space-x-3 mb-6">
-                    <div class="bg-green-100 p-3 rounded-lg">
-                        <i class="fas fa-inbox text-green-600 text-2xl"></i>
-                    </div>
-                    <div>
-                        <h2 class="text-2xl font-bold text-gray-800">Receiver</h2>
-                        <p class="text-sm text-gray-500">Decrypt & Verify Transaction</p>
-                    </div>
-                </div>
-
                 {% if result %}
-                <div class="space-y-4">
-                    <div class="bg-gradient-to-br from-gray-900 to-gray-800 rounded-lg p-4 shadow-inner">
-                        <div class="flex items-center justify-between mb-2">
-                            <span class="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-                                <i class="fas fa-key mr-1"></i>Encrypted Ciphertext
-                            </span>
-                            <span class="text-xs bg-green-500 text-white px-2 py-1 rounded-full pulse-animation">
-                                <i class="fas fa-check-circle mr-1"></i>Encrypted
-                            </span>
+                    {% if result.error %}
+                        <div class="mt-6 p-4 bg-red-50 border-l-4 border-red-500 rounded-r-lg">
+                            <div class="flex items-center">
+                                <i class="fas fa-exclamation-triangle text-red-500 text-xl mr-3"></i>
+                                <div>
+                                    <p class="font-bold text-red-800">Authentication Failed</p>
+                                    <p class="text-red-700 text-sm">{{ result.error }}</p>
+                                </div>
+                            </div>
                         </div>
-                        <p class="break-all text-xs font-mono text-green-400 leading-relaxed">{{ result.ciphertext }}</p>
+                    {% else %}
+                        <div class="mt-6 border-t-2 border-gray-200 pt-6">
+                            <div class="bg-green-50 border-l-4 border-green-500 p-4 rounded-r-lg mb-4">
+                                <div class="flex items-center">
+                                    <i class="fas fa-check-circle text-green-600 text-xl mr-3"></i>
+                                    <div>
+                                        <p class="font-bold text-green-800">Transaction Encrypted Successfully</p>
+                                        <p class="text-green-700 text-sm">Secure packet ready for transmission</p>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="bg-gray-900 rounded-lg p-5 text-green-400">
+                                <p class="text-xs font-bold text-gray-400 uppercase mb-3 flex items-center">
+                                    <i class="fas fa-cube mr-2"></i>Encrypted Data Packet
+                                </p>
+                                <p class="hash-box text-xs leading-relaxed">{{ result.ciphertext }}</p>
+                                <div class="mt-4 pt-4 border-t border-gray-700">
+                                    <div class="grid grid-cols-2 gap-3 text-xs">
+                                        <div class="flex items-center text-gray-400">
+                                            <i class="fas fa-check-circle text-green-500 mr-2"></i>HMAC Signature
+                                        </div>
+                                        <div class="flex items-center text-gray-400">
+                                            <i class="fas fa-check-circle text-green-500 mr-2"></i>Timestamp Embedded
+                                        </div>
+                                        <div class="flex items-center text-gray-400">
+                                            <i class="fas fa-check-circle text-green-500 mr-2"></i>Password Verified
+                                        </div>
+                                        <div class="flex items-center text-gray-400">
+                                            <i class="fas fa-check-circle text-green-500 mr-2"></i>AES-256 Encrypted
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <form method="POST" class="mt-4">
+                                <input type="hidden" name="nonce" value="{{ result.nonce }}">
+                                <input type="hidden" name="ciphertext" value="{{ result.ciphertext }}">
+                                <input type="hidden" name="tag" value="{{ result.tag }}">
+                                <button type="submit" name="action" value="decrypt" 
+                                        class="w-full border-2 border-blue-600 text-blue-600 py-3 px-6 rounded-lg font-semibold hover:bg-blue-50 transition flex items-center justify-center">
+                                    <i class="fas fa-server mr-2"></i>Process at Bank Server (Decrypt & Verify)
+                                </button>
+                            </form>
+                        </div>
+                    {% endif %}
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Bank Server Response -->
+        {% if final %}
+        <div class="bg-white rounded-xl shadow-lg overflow-hidden">
+            <div class="bg-gradient-to-r from-purple-600 to-purple-700 px-6 py-4">
+                <h2 class="text-xl font-bold text-white flex items-center">
+                    <i class="fas fa-server mr-3"></i>Bank Server - Decryption & Verification
+                </h2>
+            </div>
+            <div class="p-6">
+                {% if final.status == 'SUCCESS' %}
+                    <div class="bg-green-50 border-2 border-green-500 rounded-lg p-5 mb-5">
+                        <div class="flex items-center mb-4">
+                            <i class="fas fa-check-circle text-green-600 text-3xl mr-4"></i>
+                            <div>
+                                <h3 class="font-bold text-xl text-green-800">Transaction Verified ✓</h3>
+                                <p class="text-green-700">Data integrity confirmed - No tampering detected</p>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 text-sm">
+                            <div class="bg-white p-3 rounded border border-green-200">
+                                <p class="text-gray-600 font-semibold">Amount</p>
+                                <p class="text-2xl font-bold text-green-700">${{ final.amount }}</p>
+                            </div>
+                            <div class="bg-white p-3 rounded border border-green-200">
+                                <p class="text-gray-600 font-semibold">Timestamp</p>
+                                <p class="text-sm font-mono text-gray-800">{{ final.time }}</p>
+                            </div>
+                        </div>
                     </div>
-                    
-                    <form method="POST">
-                        <input type="hidden" name="nonce" value="{{ result.nonce }}">
-                        <input type="hidden" name="ciphertext" value="{{ result.ciphertext }}">
-                        <input type="hidden" name="tag" value="{{ result.tag }}">
-                        <button 
-                            type="submit" 
-                            name="action" 
-                            value="decrypt" 
-                            class="btn-success w-full text-white font-semibold py-4 px-6 rounded-lg shadow-lg flex items-center justify-center space-x-2"
-                        >
-                            <i class="fas fa-unlock"></i>
-                            <span>Decrypt & Verify</span>
-                            <i class="fas fa-check-double"></i>
-                        </button>
-                    </form>
-                </div>
+                {% elif final.status == 'TAMPERED' %}
+                    <div class="bg-red-50 border-2 border-red-500 rounded-lg p-5 mb-5">
+                        <div class="flex items-center mb-4">
+                            <i class="fas fa-exclamation-triangle text-red-600 text-3xl mr-4"></i>
+                            <div>
+                                <h3 class="font-bold text-xl text-red-800">Security Alert: Data Tampered!</h3>
+                                <p class="text-red-700">Hash verification failed - Transaction rejected</p>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4 text-sm">
+                            <div class="bg-white p-3 rounded border border-red-200">
+                                <p class="text-gray-600 font-semibold">Received Amount</p>
+                                <p class="text-2xl font-bold text-red-700">${{ final.amount }}</p>
+                            </div>
+                            <div class="bg-white p-3 rounded border border-red-200">
+                                <p class="text-gray-600 font-semibold">Timestamp</p>
+                                <p class="text-sm font-mono text-gray-800">{{ final.time }}</p>
+                            </div>
+                        </div>
+                    </div>
                 {% else %}
-                <div class="flex flex-col items-center justify-center h-64 text-gray-400">
-                    <i class="fas fa-envelope-open-text text-6xl mb-4"></i>
-                    <p class="text-lg font-medium">Waiting for encrypted transaction...</p>
-                    <p class="text-sm mt-2">Encrypted data will appear here</p>
-                </div>
+                    <div class="bg-yellow-50 border-2 border-yellow-500 rounded-lg p-5 mb-5">
+                        <div class="flex items-center">
+                            <i class="fas fa-exclamation-circle text-yellow-600 text-3xl mr-4"></i>
+                            <div>
+                                <h3 class="font-bold text-xl text-yellow-800">Decryption Error</h3>
+                                <p class="text-yellow-700">{{ final.msg }}</p>
+                            </div>
+                        </div>
+                    </div>
                 {% endif %}
 
-                {% if decrypted %}
-                <div class="mt-6 bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-500 rounded-lg p-6 shadow-lg">
-                    <div class="flex items-center space-x-2 mb-3">
-                        <i class="fas fa-check-circle text-green-600 text-xl"></i>
-                        <h3 class="font-bold text-lg text-green-800">Transaction Verified</h3>
-                    </div>
-                    <div class="bg-white rounded-lg p-4 border border-green-200">
-                        <p class="text-gray-800 font-medium">{{ decrypted }}</p>
-                    </div>
-                    <div class="mt-3 flex items-center space-x-2 text-xs text-green-700">
-                        <i class="fas fa-shield-alt"></i>
-                        <span>Authenticity verified • Integrity confirmed</span>
-                    </div>
-                </div>
-                {% endif %}
+                {% if final.received_hash %}
+                <!-- Hash Comparison Section -->
+                <div class="border-t-2 border-gray-200 pt-5 mt-5">
+                    <h3 class="font-bold text-lg mb-4 flex items-center text-gray-800">
+                        <i class="fas fa-fingerprint text-purple-600 mr-2"></i>
+                        HMAC Hash Comparison (SHA-256)
+                    </h3>
+                    
+                    <div class="space-y-4">
+                        <!-- Received Hash -->
+                        <div class="bg-blue-50 border-l-4 border-blue-500 rounded-r-lg p-4">
+                            <p class="text-sm font-bold text-blue-900 mb-2 flex items-center">
+                                <i class="fas fa-download mr-2"></i>Hash Received from Client
+                            </p>
+                            <p class="hash-box text-xs text-blue-800 bg-white p-3 rounded border border-blue-200">
+                                {{ final.received_hash }}
+                            </p>
+                        </div>
 
-                <div class="mt-6 p-4 bg-green-50 rounded-lg border border-green-200">
-                    <div class="flex items-start space-x-2">
-                        <i class="fas fa-shield-alt text-green-500 mt-1"></i>
-                        <div class="text-sm text-green-800">
-                            <p class="font-semibold">Bank-Grade Security</p>
-                            <p class="text-green-600">All transactions are verified for authenticity and integrity.</p>
+                        <!-- Computed Hash -->
+                        <div class="bg-purple-50 border-l-4 border-purple-500 rounded-r-lg p-4">
+                            <p class="text-sm font-bold text-purple-900 mb-2 flex items-center">
+                                <i class="fas fa-calculator mr-2"></i>Hash Computed by Bank Server
+                            </p>
+                            <p class="hash-box text-xs text-purple-800 bg-white p-3 rounded border border-purple-200">
+                                {{ final.computed_hash }}
+                            </p>
+                        </div>
+
+                        <!-- Comparison Result -->
+                        <div class="bg-gray-100 rounded-lg p-5 text-center">
+                            {% if final.hash_match %}
+                                <div class="flex items-center justify-center text-green-700 mb-2">
+                                    <i class="fas fa-equals text-3xl mr-3"></i>
+                                    <span class="text-2xl font-bold">Hashes Match</span>
+                                    <i class="fas fa-check-circle text-3xl ml-3"></i>
+                                </div>
+                                <p class="text-green-800 font-semibold">✓ Data integrity verified - No tampering detected</p>
+                                <p class="text-sm text-gray-600 mt-2">The transaction data has not been modified during transmission</p>
+                            {% else %}
+                                <div class="flex items-center justify-center text-red-700 mb-2">
+                                    <i class="fas fa-not-equal text-3xl mr-3"></i>
+                                    <span class="text-2xl font-bold">Hashes Don't Match</span>
+                                    <i class="fas fa-times-circle text-3xl ml-3"></i>
+                                </div>
+                                <p class="text-red-800 font-semibold">✗ Data integrity compromised - Tampering detected!</p>
+                                <p class="text-sm text-gray-600 mt-2">The transaction data was modified after encryption</p>
+                            {% endif %}
                         </div>
                     </div>
                 </div>
+                {% endif %}
             </div>
         </div>
-
-        <!-- Security Features -->
-        <div class="mt-8 grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div class="bg-white rounded-xl p-6 shadow-md text-center card-hover">
-                <div class="bg-blue-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <i class="fas fa-lock text-blue-600 text-2xl"></i>
-                </div>
-                <h3 class="font-bold text-gray-800 mb-2">AES-256 Encryption</h3>
-                <p class="text-sm text-gray-600">Military-grade encryption protecting your sensitive data</p>
-            </div>
-            
-            <div class="bg-white rounded-xl p-6 shadow-md text-center card-hover">
-                <div class="bg-green-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <i class="fas fa-check-double text-green-600 text-2xl"></i>
-                </div>
-                <h3 class="font-bold text-gray-800 mb-2">Authentication</h3>
-                <p class="text-sm text-gray-600">Verify sender identity and data integrity</p>
-            </div>
-            
-            <div class="bg-white rounded-xl p-6 shadow-md text-center card-hover">
-                <div class="bg-purple-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
-                    <i class="fas fa-user-shield text-purple-600 text-2xl"></i>
-                </div>
-                <h3 class="font-bold text-gray-800 mb-2">Privacy Protected</h3>
-                <p class="text-sm text-gray-600">Your transaction details remain confidential</p>
-            </div>
-        </div>
+        {% endif %}
     </div>
 
     <!-- Footer -->
-    <div class="bg-gray-800 text-gray-300 mt-12 py-6">
-        <div class="max-w-7xl mx-auto px-4 text-center">
-            <p class="text-sm">© 2026 SecureBank. All rights reserved. | Powered by AES-256 Encryption</p>
-            <p class="text-xs mt-2 text-gray-500">
-                <i class="fas fa-lock mr-1"></i>Your security is our priority
-            </p>
-        </div>
+    <div class="text-center py-6 text-gray-600 text-sm">
+        <p><i class="fas fa-shield-alt text-blue-600"></i> Tocashless - AES-256 Encrypted Transaction System | Group A4</p>
+        <p class="text-xs mt-1">Protected by multi-layer encryption: Password Authentication • HMAC Signature • Timestamp • AES Encryption</p>
     </div>
 </body>
 </html>
@@ -289,20 +331,14 @@ HTML_UI = """
 
 @app.route("/", methods=["GET", "POST"])
 def index():
-    result = None
-    decrypted = None
+    result, final = None, None
     if request.method == "POST":
         action = request.form.get("action")
         if action == "encrypt":
-            msg = request.form.get("message")
-            result = encrypt_aes(msg)
+            result = build_secure_packet(request.form.get("amount"), request.form.get("password"))
         elif action == "decrypt":
-            decrypted = decrypt_aes(
-                request.form.get("nonce"),
-                request.form.get("ciphertext"),
-                request.form.get("tag")
-            )
-    return render_template_string(HTML_UI, result=result, decrypted=decrypted)
+            final = decrypt_and_verify(request.form.get("nonce"), request.form.get("ciphertext"), request.form.get("tag"))
+    return render_template_string(HTML_UI, result=result, final=final)
 
 if __name__ == "__main__":
     app.run(debug=True)
