@@ -107,6 +107,136 @@ HTML_UI = """
     </div>
 
     <div class="max-w-4xl mx-auto px-6 py-8">
+        <!-- AES Encryption/Decryption Process Diagram -->
+        <div class="bg-white rounded-xl shadow-lg overflow-hidden mb-6">
+            <div class="bg-gradient-to-r from-indigo-600 to-indigo-700 px-6 py-4">
+                <h2 class="text-xl font-bold text-white flex items-center">
+                    <i class="fas fa-project-diagram mr-3"></i>AES Encryption & Decryption Flow
+                </h2>
+            </div>
+            <div class="p-6">
+                <!-- Encryption Process -->
+                <div class="mb-8">
+                    <h3 class="text-lg font-bold text-gray-800 mb-4 flex items-center">
+                        <i class="fas fa-lock text-green-600 mr-2"></i>Encryption Process (Client Side)
+                    </h3>
+                    <div class="flex items-center justify-between space-x-2">
+                        <!-- Step 1 -->
+                        <div class="flex-1 bg-blue-50 border-2 border-blue-300 rounded-lg p-4 text-center">
+                            <div class="text-3xl mb-2">🔐</div>
+                            <div class="font-bold text-sm text-blue-900">Password Check</div>
+                            <div class="text-xs text-gray-600 mt-1">Verify: 123456</div>
+                        </div>
+                        <div class="text-2xl text-gray-400">→</div>
+                        
+                        <!-- Step 2 -->
+                        <div class="flex-1 bg-purple-50 border-2 border-purple-300 rounded-lg p-4 text-center">
+                            <div class="text-3xl mb-2">🔏</div>
+                            <div class="font-bold text-sm text-purple-900">HMAC Sign</div>
+                            <div class="text-xs text-gray-600 mt-1">SHA-256 Hash</div>
+                        </div>
+                        <div class="text-2xl text-gray-400">→</div>
+                        
+                        <!-- Step 3 -->
+                        <div class="flex-1 bg-yellow-50 border-2 border-yellow-300 rounded-lg p-4 text-center">
+                            <div class="text-3xl mb-2">📦</div>
+                            <div class="font-bold text-sm text-yellow-900">Build Packet</div>
+                            <div class="text-xs text-gray-600 mt-1">Amount|Time|Hash</div>
+                        </div>
+                        <div class="text-2xl text-gray-400">→</div>
+                        
+                        <!-- Step 4 -->
+                        <div class="flex-1 bg-green-50 border-2 border-green-300 rounded-lg p-4 text-center">
+                            <div class="text-3xl mb-2">🔒</div>
+                            <div class="font-bold text-sm text-green-900">AES Encrypt</div>
+                            <div class="text-xs text-gray-600 mt-1">EAX Mode</div>
+                        </div>
+                        <div class="text-2xl text-gray-400">→</div>
+                        
+                        <!-- Step 5 -->
+                        <div class="flex-1 bg-gray-800 border-2 border-gray-700 rounded-lg p-4 text-center">
+                            <div class="text-3xl mb-2">📡</div>
+                            <div class="font-bold text-sm text-white">Send</div>
+                            <div class="text-xs text-gray-300 mt-1">Ciphertext</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Decryption Process -->
+                <div>
+                    <h3 class="text-lg font-bold text-gray-800 mb-4 flex items-center">
+                        <i class="fas fa-unlock text-red-600 mr-2"></i>Decryption Process (Bank Server)
+                    </h3>
+                    <div class="flex items-center justify-between space-x-2">
+                        <!-- Step 1 -->
+                        <div class="flex-1 bg-gray-800 border-2 border-gray-700 rounded-lg p-4 text-center">
+                            <div class="text-3xl mb-2">📥</div>
+                            <div class="font-bold text-sm text-white">Receive</div>
+                            <div class="text-xs text-gray-300 mt-1">Ciphertext</div>
+                        </div>
+                        <div class="text-2xl text-gray-400">→</div>
+                        
+                        <!-- Step 2 -->
+                        <div class="flex-1 bg-red-50 border-2 border-red-300 rounded-lg p-4 text-center">
+                            <div class="text-3xl mb-2">🔓</div>
+                            <div class="font-bold text-sm text-red-900">AES Decrypt</div>
+                            <div class="text-xs text-gray-600 mt-1">Extract Payload</div>
+                        </div>
+                        <div class="text-2xl text-gray-400">→</div>
+                        
+                        <!-- Step 3 -->
+                        <div class="flex-1 bg-orange-50 border-2 border-orange-300 rounded-lg p-4 text-center">
+                            <div class="text-3xl mb-2">📋</div>
+                            <div class="font-bold text-sm text-orange-900">Parse Data</div>
+                            <div class="text-xs text-gray-600 mt-1">Split Packet</div>
+                        </div>
+                        <div class="text-2xl text-gray-400">→</div>
+                        
+                        <!-- Step 4 -->
+                        <div class="flex-1 bg-indigo-50 border-2 border-indigo-300 rounded-lg p-4 text-center">
+                            <div class="text-3xl mb-2">🔍</div>
+                            <div class="font-bold text-sm text-indigo-900">Compute Hash</div>
+                            <div class="text-xs text-gray-600 mt-1">SHA-256</div>
+                        </div>
+                        <div class="text-2xl text-gray-400">→</div>
+                        
+                        <!-- Step 5 -->
+                        <div class="flex-1 bg-teal-50 border-2 border-teal-300 rounded-lg p-4 text-center">
+                            <div class="text-3xl mb-2">✅</div>
+                            <div class="font-bold text-sm text-teal-900">Verify</div>
+                            <div class="text-xs text-gray-600 mt-1">Compare Hash</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Security Layers Info -->
+                <div class="mt-6 bg-gradient-to-r from-blue-50 to-purple-50 rounded-lg p-4 border-2 border-blue-200">
+                    <h4 class="font-bold text-gray-800 mb-3 flex items-center">
+                        <i class="fas fa-layer-group text-blue-600 mr-2"></i>
+                        Security Layers Applied
+                    </h4>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div class="flex items-center text-sm">
+                            <i class="fas fa-check-circle text-green-600 mr-2"></i>
+                            <span class="text-gray-700">Password Auth</span>
+                        </div>
+                        <div class="flex items-center text-sm">
+                            <i class="fas fa-check-circle text-green-600 mr-2"></i>
+                            <span class="text-gray-700">HMAC-SHA256</span>
+                        </div>
+                        <div class="flex items-center text-sm">
+                            <i class="fas fa-check-circle text-green-600 mr-2"></i>
+                            <span class="text-gray-700">Timestamp</span>
+                        </div>
+                        <div class="flex items-center text-sm">
+                            <i class="fas fa-check-circle text-green-600 mr-2"></i>
+                            <span class="text-gray-700">AES-256 EAX</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Client Transaction Form -->
         <div class="bg-white rounded-xl shadow-lg overflow-hidden mb-6">
             <div class="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-4">
